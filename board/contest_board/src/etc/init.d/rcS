@@ -1,0 +1,10 @@
+/*
+ * etc/init.d/rcS
+ *
+ * 最小 NSH 启动脚本 —— 只挂载 procfs，不启动任何额外服务
+ */
+
+mkdir /proc
+mount -t procfs /proc
+
+echo "NuttShell (NSH)"

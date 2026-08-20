@@ -1,11 +1,8 @@
 #
-# Contest 2026 team 000 board placeholder
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
 #
 
-if ARCH_BOARD_CONTEST2026_000_BOARD
+if ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
 
-config ARCH_BOARD_CONTEST2026_000_BOARD_TAG
-	string "Board tag"
-	default "contest2026_000_board"
-
-endif
+endif # ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
