@@ -51,3 +51,78 @@ mkdir -p /tmp/nuttx_patchtest
 cd <openvela 根目录>/nuttx
 git archive dd92bcf425738734d1b8aed09c2bd4dbe3f2e438 | tar -x -C /tmp/nuttx_patchtest
 ```
+
+---
+
+# 0002-esp-hal-skip-psram-mmu-unmap.patch
+
+## 性质：临时绕行（workaround），非功能补充
+
+与 `0001` 不同——`0001` 补充的是缺失的 P4 支持代码，属于长期需要；
+本补丁是绕开一个上游缺陷，**上游修复后应当删除**。
+
+## 目标仓库
+
+`nuttx/arch/risc-v/src/esp32p4/esp-hal-3rdparty`（独立 git 仓库，构建时自动拉取）
+
+- 基线提交：`8d0a898910084206721a0892ab093021bca1496a`
+- 与 `arch/risc-v/src/esp32p4/Make.defs` 中的 `ESP_HAL_3RDPARTY_VERSION` 一致
+
+## 解决的问题
+
+启用 PSRAM / 以太网 / SPI Flash 任一功能时，系统在启动早期崩溃：
+
+- 现象一：看门狗 10.3 秒周期复位（LP WDT）
+- 现象二：停在异常处理中，串口保持连接但无 NSH 提示符
+- 两种现象下串口均无任何输出
+
+## 根因
+
+bootloader_init_ext_mem() bootloader_esp32p4.c:162
+→ mmu_hal_init()
+→ mmu_hal_unmap_all() components/hal/mmu_hal.c:40
+→ mmu_ll_unmap_all(MMU_LL_PSRAM_MMU_ID)
+→ REG_WRITE(SPI_MEM_S_MMU_ITEM_INDEX_REG, ...)
+地址 = DR_REG_PSRAM_MSPI0_BASE + 0x380 = 0x5008e380
+→ PMP Store access fault (mcause=0x30000007, mtval=0x5008e380)
+→ exception_common → riscv_doirq
+→ 中断上下文尚未建立，空指针二次崩溃 (mtval=0xa8)
+
+
+**PSRAM MSPI 控制器在此时尚未初始化，写其 MMU 寄存器被 PMP 拒绝。**
+
+ESP-IDF 有二级引导程序负责该控制器的初始化；NuttX 在 P4 上使用 Simple Boot
+（`CONFIG_ESPRESSIF_SIMPLE_BOOT=y`），ROM 直接跳转至 NuttX，跳过了这一步。
+
+## 相关上游 issue
+
+espressif/esp-idf#16763（IDFGH-15850）
+"ESP32-P4 bootloader sometimes bootloops in mmu_ll_unmap_all"
+
+- 状态：Closed，标签 `Resolution: Done`
+- 报告者崩溃地址同为 `0x5008e380`，芯片 revision **v1.0**（本项目为 v3.2）
+  → **与芯片修订版无关**
+- 报告者为间歇性（约 1/10），本项目为每次必现
+  → 推测与 ESP-IDF 有二级引导、NuttX 无二级引导的差异有关
+
+## 局限
+
+本补丁直接注释掉 PSRAM MMU 清空，**在使用 PSRAM 时可能导致残留映射**。
+正式方案应为：条件编译，或在调用前先初始化 PSRAM MSPI 控制器。
+
+## 怎么用
+
+```bash
+cd <nuttx>/arch/risc-v/src/esp32p4/esp-hal-3rdparty
+git apply --check ../../../../../../contest2026_330_neiheyoumuzhe/patches/0002-esp-hal-skip-psram-mmu-unmap.patch
+git apply ../../../../../../contest2026_330_neiheyoumuzhe/patches/0002-esp-hal-skip-psram-mmu-unmap.patch
+```
+
+相对路径以实际目录结构为准，建议改用绝对路径。
+
+## 验证记录
+
+应用本补丁后，`spiflash` 配置可正常启动，SmartFS 经 `mksmartfs /dev/smart0`
+格式化后可挂载、读写、重启后数据持久。
+
+详见 `03_04R_共同根因_MMU初始化PMP异常.md`。
